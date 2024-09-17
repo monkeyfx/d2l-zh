@@ -1,16 +1,34 @@
-# 机器翻译和数据集
+# 机器翻译与数据集
 :label:`sec_machine_translation`
 
-我们使用 RNN 来设计语言模型，这是自然语言处理的关键。另一个旗舰基准是 * 机器转换 *，这是将输入序列转换为输出序列的 * 序列传感 * 模型的核心问题领域。序列转导模型在各种现代 AI 应用中发挥关键作用，将成为本章剩余部分和 :numref:`chap_attention` 的重点。为此，本节介绍机器翻译问题及其稍后将使用的数据集。
+语言模型是自然语言处理的关键，
+而*机器翻译*是语言模型最成功的基准测试。
+因为机器翻译正是将输入序列转换成输出序列的
+*序列转换模型*（sequence transduction）的核心问题。
+序列转换模型在各类现代人工智能应用中发挥着至关重要的作用，
+因此我们将其做为本章剩余部分和 :numref:`chap_attention`的重点。
+为此，本节将介绍机器翻译问题及其后文需要使用的数据集。
 
-*机器翻译 * 是指
-将序列从一种语言自动翻译为另一种语言。事实上，这个领域可能追溯到 20 世纪 40 年代数字计算机发明之后不久，特别是考虑在二战中使用计算机破解语言代码。几十年来，在使用神经网络进行端到端学习兴起之前，统计方法在该领域占主导地位 :cite:`Brown.Cocke.Della-Pietra.ea.1988,Brown.Cocke.Della-Pietra.ea.1990`。后者通常被称为
-*神经机器翻译 *
-将自己与
-*统计机翻译 *
-这涉及对翻译模型和语言模型等组成部分进行统计分析.
+*机器翻译*（machine translation）指的是
+将序列从一种语言自动翻译成另一种语言。
+事实上，这个研究领域可以追溯到数字计算机发明后不久的20世纪40年代，
+特别是在第二次世界大战中使用计算机破解语言编码。
+几十年来，在使用神经网络进行端到端学习的兴起之前，
+统计学方法在这一领域一直占据主导地位
+ :cite:`Brown.Cocke.Della-Pietra.ea.1988,Brown.Cocke.Della-Pietra.ea.1990`。
+因为*统计机器翻译*（statistical machine translation）涉及了
+翻译模型和语言模型等组成部分的统计分析，
+因此基于神经网络的方法通常被称为
+*神经机器翻译*（neural machine translation），
+用于将两种翻译模型区分开来。
 
-本书强调端到端学习，将重点介绍神经机器翻译方法。与我们在 :numref:`sec_language_model` 语料库中使用单一语言的语料模型问题不同，机器翻译数据集由分别使用源语言和目标语言的文本序列对组成。因此，我们需要一种不同的方法来预处理机器翻译数据集，而不是重复使用预处理程序进行语言建模。在下面，我们将展示如何将预处理的数据加载到小批中进行培训。
+本书的关注点是神经网络机器翻译方法，强调的是端到端的学习。
+与 :numref:`sec_language_model`中的语料库
+是单一语言的语言模型问题存在不同，
+机器翻译的数据集是由源语言和目标语言的文本序列对组成的。
+因此，我们需要一种完全不同的方法来预处理机器翻译数据集，
+而不是复用语言模型的预处理程序。
+下面，我们看一下如何将预处理后的数据加载到小批量中用于训练。
 
 ```{.python .input}
 from d2l import mxnet as d2l
@@ -33,9 +51,25 @@ import tensorflow as tf
 import os
 ```
 
-## 下载和预处理数据集
+```{.python .input}
+#@tab paddle
+from d2l import paddle as d2l
+import warnings
+warnings.filterwarnings("ignore")
+import paddle
+import os
+```
 
-首先，我们下载一个由 [bilingual sentence pairs from the Tatoeba Project](http://www.manythings.org/anki/) 组成的英法数据集。数据集中的每一行都是一对制表符分隔的英文文本序列和翻译的法语文本序列。请注意，每个文本序列可以只是一个句子，也可以是多个句子的一段。在这个英语翻译成法语的机器翻译问题中，英语是 * 源语言 *，法语是 * 目标语言 *。
+## [**下载和预处理数据集**]
+
+首先，下载一个由[Tatoeba项目的双语句子对](http://www.manythings.org/anki/)
+组成的“英－法”数据集，数据集中的每一行都是制表符分隔的文本序列对，
+序列对由英文文本序列和翻译后的法语文本序列组成。
+请注意，每个文本序列可以是一个句子，
+也可以是包含多个句子的一个段落。
+在这个将英语翻译成法语的机器翻译问题中，
+英语是*源语言*（source language），
+法语是*目标语言*（target language）。
 
 ```{.python .input}
 #@tab all
@@ -45,29 +79,32 @@ d2l.DATA_HUB['fra-eng'] = (d2l.DATA_URL + 'fra-eng.zip',
 
 #@save
 def read_data_nmt():
-    """Load the English-French dataset."""
+    """载入“英语－法语”数据集"""
     data_dir = d2l.download_extract('fra-eng')
-    with open(os.path.join(data_dir, 'fra.txt'), 'r') as f:
+    with open(os.path.join(data_dir, 'fra.txt'), 'r', 
+             encoding='utf-8') as f:
         return f.read()
 
 raw_text = read_data_nmt()
 print(raw_text[:75])
 ```
 
-下载数据集后，我们将继续对原始文本数据进行几个预处理步骤。例如，我们用空格替换不间断的空格，将大写字母转换为小写字母，然后在单词和标点符号之间插入空格。
+下载数据集后，原始文本数据需要经过[**几个预处理步骤**]。
+例如，我们用空格代替*不间断空格*（non-breaking space），
+使用小写字母替换大写字母，并在单词和标点符号之间插入空格。
 
 ```{.python .input}
 #@tab all
 #@save
 def preprocess_nmt(text):
-    """Preprocess the English-French dataset."""
+    """预处理“英语－法语”数据集"""
     def no_space(char, prev_char):
         return char in set(',.!?') and prev_char != ' '
 
-    # Replace non-breaking space with space, and convert uppercase letters to
-    # lowercase ones
+    # 使用空格替换不间断空格
+    # 使用小写字母替换大写字母
     text = text.replace('\u202f', ' ').replace('\xa0', ' ').lower()
-    # Insert space between words and punctuation marks
+    # 在单词和标点符号之间插入空格
     out = [' ' + char if i > 0 and no_space(char, text[i - 1]) else char
            for i, char in enumerate(text)]
     return ''.join(out)
@@ -76,15 +113,22 @@ text = preprocess_nmt(raw_text)
 print(text[:80])
 ```
 
-## 令牌化
+## [**词元化**]
 
-与 :numref:`sec_language_model` 中的字符级令牌化不同，对于机器翻译，我们更喜欢这里的字级标记化（最先进的模型可能使用更先进的标记化技术）。以下 `tokenize_nmt` 函数标记了前 `num_examples` 文本序列对，其中每个标记都是一个单词或标点符号。此函数返回两个令牌列表：`source` 和 `target`。具体来说，`source[i]` 是源语言（英语）$i^\mathrm{th}$ 文本序列中的令牌列表，`target[i]` 是目标语言（此处法语）。
+与 :numref:`sec_language_model`中的字符级词元化不同，
+在机器翻译中，我们更喜欢单词级词元化
+（最先进的模型可能使用更高级的词元化技术）。
+下面的`tokenize_nmt`函数对前`num_examples`个文本序列对进行词元，
+其中每个词元要么是一个词，要么是一个标点符号。
+此函数返回两个词元列表：`source`和`target`：
+`source[i]`是源语言（这里是英语）第$i$个文本序列的词元列表，
+`target[i]`是目标语言（这里是法语）第$i$个文本序列的词元列表。
 
 ```{.python .input}
 #@tab all
 #@save
 def tokenize_nmt(text, num_examples=None):
-    """Tokenize the English-French dataset."""
+    """词元化“英语－法语”数据数据集"""
     source, target = [], []
     for i, line in enumerate(text.split('\n')):
         if num_examples and i > num_examples:
@@ -99,22 +143,38 @@ source, target = tokenize_nmt(text)
 source[:6], target[:6]
 ```
 
-让我们绘制每个文本序列的令牌数的直方图。在这个简单的英法数据集中，大多数文本序列的令牌少于 20 个。
+让我们[**绘制每个文本序列所包含的词元数量的直方图**]。
+在这个简单的“英－法”数据集中，大多数文本序列的词元数量少于$20$个。
 
 ```{.python .input}
 #@tab all
-d2l.set_figsize()
-_, _, patches = d2l.plt.hist(
-    [[len(l) for l in source], [len(l) for l in target]],
-    label=['source', 'target'])
-for patch in patches[1].patches:
-    patch.set_hatch('/')
-d2l.plt.legend(loc='upper right');
+#@save
+def show_list_len_pair_hist(legend, xlabel, ylabel, xlist, ylist):
+    """绘制列表长度对的直方图"""
+    d2l.set_figsize()
+    _, _, patches = d2l.plt.hist(
+        [[len(l) for l in xlist], [len(l) for l in ylist]])
+    d2l.plt.xlabel(xlabel)
+    d2l.plt.ylabel(ylabel)
+    for patch in patches[1].patches:
+        patch.set_hatch('/')
+    d2l.plt.legend(legend)
+
+show_list_len_pair_hist(['source', 'target'], '# tokens per sequence',
+                        'count', source, target);
 ```
 
-## 词汇
+## [**词表**]
 
-由于机器翻译数据集由对语言组成，因此我们可以为源语言和目标语言分别构建两个词汇表。使用单词级令牌化，词汇量大小将远远大于使用字符级标记的词汇量。为了缓解这种情况，这里我们将出现少于 2 倍的不经常的令牌视为同一个未知 (” <unk> “) 令牌。除此之外，我们还指定了额外的特殊标记，例如用于填充 (” <pad> “) 序列的小批次长度相同，以及用于标记 <bos> <eos> 序列的开头 (” “) 或 end (” “)。这种特殊令牌通常用于自然语言处理任务。
+由于机器翻译数据集由语言对组成，
+因此我们可以分别为源语言和目标语言构建两个词表。
+使用单词级词元化时，词表大小将明显大于使用字符级词元化时的词表大小。
+为了缓解这一问题，这里我们将出现次数少于2次的低频率词元
+视为相同的未知（“&lt;unk&gt;”）词元。
+除此之外，我们还指定了额外的特定词元，
+例如在小批量时用于将序列填充到相同长度的填充词元（“&lt;pad&gt;”），
+以及序列的开始词元（“&lt;bos&gt;”）和结束词元（“&lt;eos&gt;”）。
+这些特殊词元在自然语言处理任务中比较常用。
 
 ```{.python .input}
 #@tab all
@@ -126,31 +186,52 @@ len(src_vocab)
 ## 加载数据集
 :label:`subsec_mt_data_loading`
 
-回想一下，在语言建模中，每个序列示例，无论是一个句子的一段或多个句子的跨度，都有固定的长度。:numref:`sec_language_model` 中的 `num_steps`（时间步长或令牌数）参数指定了这一点。在机器翻译中，每个示例都是一对源文本序列和目标文本序列，其中每个文本序列可能具有不同的长度。
+回想一下，语言模型中的[**序列样本都有一个固定的长度**]，
+无论这个样本是一个句子的一部分还是跨越了多个句子的一个片断。
+这个固定长度是由 :numref:`sec_language_model`中的
+`num_steps`（时间步数或词元数量）参数指定的。
+在机器翻译中，每个样本都是由源和目标组成的文本序列对，
+其中的每个文本序列可能具有不同的长度。
 
-为了提高计算效率，我们仍然可以通过 * 截断 * 和 * 填充 * 同时处理一批文本序列。假设同一个小批次中的每个序列都应该具有相同的长度 `num_steps`。如果文本序列的令牌少于 `num_steps`，我们将继续将特殊的 “<pad>” 令牌附加到其末尾，直到其长度达到 `num_steps`。否则，我们将通过仅获取第一个 `num_steps` 令牌并丢弃剩余的来截断文本序列。通过这种方式，每个文本序列的长度将相同，以相同形状的小批量加载。
+为了提高计算效率，我们仍然可以通过*截断*（truncation）和
+*填充*（padding）方式实现一次只处理一个小批量的文本序列。
+假设同一个小批量中的每个序列都应该具有相同的长度`num_steps`，
+那么如果文本序列的词元数目少于`num_steps`时，
+我们将继续在其末尾添加特定的“&lt;pad&gt;”词元，
+直到其长度达到`num_steps`；
+反之，我们将截断文本序列时，只取其前`num_steps` 个词元，
+并且丢弃剩余的词元。这样，每个文本序列将具有相同的长度，
+以便以相同形状的小批量进行加载。
 
-如前所述，以下 `truncate_pad` 函数会截断或填充文本序列。
+如前所述，下面的`truncate_pad`函数将(**截断或填充文本序列**)。
 
 ```{.python .input}
 #@tab all
 #@save
 def truncate_pad(line, num_steps, padding_token):
-    """Truncate or pad sequences."""
+    """截断或填充文本序列"""
     if len(line) > num_steps:
-        return line[:num_steps]  # Truncate
-    return line + [padding_token] * (num_steps - len(line))  # Pad
+        return line[:num_steps]  # 截断
+    return line + [padding_token] * (num_steps - len(line))  # 填充
 
 truncate_pad(src_vocab[source[0]], 10, src_vocab['<pad>'])
 ```
 
-现在我们定义了一个函数来将文本序列转换为小批进行训练。我们将特殊的 “<eos>” 标记附加到每个序列的末尾，以表示序列的结束。当模型通过在令牌后生成序列令牌来进行预测时，“<eos>” 令牌的生成可能表明输出序列已完成。此外，我们还记录每个文本序列的长度，不包括填充标记。我们稍后将介绍的一些模型将需要这些信息。
+现在我们定义一个函数，可以将文本序列
+[**转换成小批量数据集用于训练**]。
+我们将特定的“&lt;eos&gt;”词元添加到所有序列的末尾，
+用于表示序列的结束。
+当模型通过一个词元接一个词元地生成序列进行预测时，
+生成的“&lt;eos&gt;”词元说明完成了序列输出工作。
+此外，我们还记录了每个文本序列的长度，
+统计长度时排除了填充词元，
+在稍后将要介绍的一些模型会需要这个长度信息。
 
 ```{.python .input}
 #@tab all
 #@save
 def build_array_nmt(lines, vocab, num_steps):
-    """Transform text sequences of machine translation into minibatches."""
+    """将机器翻译的文本序列转换成小批量"""
     lines = [vocab[l] for l in lines]
     lines = [l + [vocab['<eos>']] for l in lines]
     array = d2l.tensor([truncate_pad(
@@ -160,15 +241,16 @@ def build_array_nmt(lines, vocab, num_steps):
     return array, valid_len
 ```
 
-## 把所有东西放在一起
+## [**训练模型**]
 
-最后，我们定义了 `load_data_nmt` 函数来返回数据迭代器，以及源语言和目标语言的词汇表。
+最后，我们定义`load_data_nmt`函数来返回数据迭代器，
+以及源语言和目标语言的两种词表。
 
 ```{.python .input}
 #@tab all
 #@save
 def load_data_nmt(batch_size, num_steps, num_examples=600):
-    """Return the iterator and the vocabularies of the translation dataset."""
+    """返回翻译数据集的迭代器和词表"""
     text = preprocess_nmt(read_data_nmt())
     source, target = tokenize_nmt(text, num_examples)
     src_vocab = d2l.Vocab(source, min_freq=2,
@@ -182,34 +264,38 @@ def load_data_nmt(batch_size, num_steps, num_examples=600):
     return data_iter, src_vocab, tgt_vocab
 ```
 
-让我们阅读英法数据集中的第一个小批。
+下面我们[**读出“英语－法语”数据集中的第一个小批量数据**]。
 
 ```{.python .input}
 #@tab all
 train_iter, src_vocab, tgt_vocab = load_data_nmt(batch_size=2, num_steps=8)
 for X, X_valid_len, Y, Y_valid_len in train_iter:
     print('X:', d2l.astype(X, d2l.int32))
-    print('valid lengths for X:', X_valid_len)
+    print('X的有效长度:', X_valid_len)
     print('Y:', d2l.astype(Y, d2l.int32))
-    print('valid lengths for Y:', Y_valid_len)
+    print('Y的有效长度:', Y_valid_len)
     break
 ```
 
-## 摘要
+## 小结
 
-* 机器翻译是指将序列从一种语言自动翻译为另一种语言。
-* 使用单词级令牌化，词汇量大小将明显大于使用字符级令牌化的词汇量。为了缓解这种情况，我们可以将不常见的令牌视为同一个未知代币。
-* 我们可以截断和填充文本序列，以便所有文本序列都具有相同的长度以小批量加载。
+* 机器翻译指的是将文本序列从一种语言自动翻译成另一种语言。
+* 使用单词级词元化时的词表大小，将明显大于使用字符级词元化时的词表大小。为了缓解这一问题，我们可以将低频词元视为相同的未知词元。
+* 通过截断和填充文本序列，可以保证所有的文本序列都具有相同的长度，以便以小批量的方式加载。
 
 ## 练习
 
-1. 在 `load_data_nmt` 函数中尝试 `num_examples` 参数的不同值。这对源语言和目标语言的词汇量大小有何影响？
-1. 某些语言（如中文和日语）的文本没有字边界指示符（例如空格）。对于这种情况，单词级标记化仍然是一个好主意吗？为什么或为什么不？
+1. 在`load_data_nmt`函数中尝试不同的`num_examples`参数值。这对源语言和目标语言的词表大小有何影响？
+1. 某些语言（例如中文和日语）的文本没有单词边界指示符（例如空格）。对于这种情况，单词级词元化仍然是个好主意吗？为什么？
 
 :begin_tab:`mxnet`
-[Discussions](https://discuss.d2l.ai/t/344)
+[Discussions](https://discuss.d2l.ai/t/2777)
 :end_tab:
 
 :begin_tab:`pytorch`
-[Discussions](https://discuss.d2l.ai/t/1060)
+[Discussions](https://discuss.d2l.ai/t/2776)
+:end_tab:
+
+:begin_tab:`paddle`
+[Discussions](https://discuss.d2l.ai/t/11836)
 :end_tab:

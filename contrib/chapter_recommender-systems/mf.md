@@ -1,10 +1,10 @@
 # 矩阵分解
 
-矩阵分解（Matrix Factorization，MF）是推荐系统文献中公认的一种算法。最初版本的矩阵分解模型由Simon Funk发表在一篇非常知名的[博文](https://sifter.org/~simon/journal/20061211.html)中，他在这篇博文描述了分解矩阵的想法。随后，由于2006年举办的Netflix竞赛，该模型变得广为人知。那时，流媒体和视频租赁公司Netflix为了增进其推荐系统的性能而举办了一项比赛。如果最佳团队（例如Cinematch）能够将Netflix的基线提高10%，那么他们将赢得100万美元的奖励。这一比赛在推荐系统领域引起了广泛的关注。随后，BellKor's Pragmatic Chaos团队（一个由BellKor、Pragmatic Theory和BigChaos混合组成的团队）赢得了这一大奖。尽管他们的最终评分来自一个集成解决方案，矩阵分解算法仍在其中起到了关键作用。Netflix Grand Prize的技术报告:cite:`Toscher.Jahrer.Bell.2009`详细解释了该方案所采用的模型。在本节中，我们将深入研究矩阵分解模型的细节和实现过程。
+矩阵分解（Matrix Factorization，MF）是推荐系统文献中公认的一种算法。最初版本的矩阵分解模型由Simon Funk发表在一篇非常知名的[博文](https://sifter.org/~simon/journal/20061211.html)中，他在这篇博文描述了分解矩阵的想法。随后，由于2006年举办的Netflix竞赛，该模型变得广为人知。那时，流媒体和视频租赁公司Netflix为了增进其推荐系统的性能而举办了一项比赛。如果最佳团队（例如Cinematch）能够将Netflix的基线提高10%，那么他们将赢得100万美元的奖励。这一比赛在推荐系统领域引起了广泛的关注。随后，BellKor's Pragmatic Chaos团队（一个由BellKor、Pragmatic Theory和BigChaos混合组成的团队）赢得了这一大奖。尽管他们的最终评分来自一个集成解决方案，矩阵分解算法仍在其中起到了关键作用。Netflix Grand Prize的技术报告:cite:`Toscher.Jahrer.Bell.2009`详细解释了该方案所采用的模型。本节将深入研究矩阵分解模型的细节和实现过程。
 
 ## 矩阵分解模型
 
-矩阵分解是一种协同过滤模型。具体来说，该模型将用户-物品交互矩阵（例如评分矩阵）分解为两个低秩矩阵的乘积，从而得到用户和物品的低秩结构。
+矩阵分解是一种协同过滤模型。具体来说，该模型将用户-物品交互矩阵（例如评分矩阵）分解为两个低秩矩阵的乘积，从而得到用户和物品的低秩架构。
 
 使用$\mathbf{R} \in \mathbb{R}^{m \times n}$表示具有$m$个用户和$n$个物品的交互矩阵，矩阵$\mathbf{R}$的数值表示显式评分。用户-物品交互矩阵将被分解成用户潜矩阵$\mathbf{P} \in \mathbb{R}^{m \times k}$和物品潜矩阵$\mathbf{Q} \in \mathbb{R}^{n \times k}$。其中，表示潜因子尺寸的$k \ll m, n$。使用$\mathbf{p}_u$表示矩阵$\mathbf{P}$的第$u$行，同时使用$\mathbf{q}_i$表示矩阵$\mathbf{Q}$的第$i$行。对于某一物品$i$，$\mathbf{q}_i$中的数值衡量了特征（例如电影风格和语言等）的大小。对于某一用户$u$，$\mathbf{p}_u$中的数值衡量他对物品相应特征的感兴趣程度。这些潜因子可能代表了之前提到的一些维度，但同时它们也可能是完全无法理解的。 用户对物品的预测评分可以通过下式计算：
 

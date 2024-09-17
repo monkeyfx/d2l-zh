@@ -1,28 +1,75 @@
-# 封闭的经常单位 (GRU)
+# 门控循环单元（GRU）
 :label:`sec_gru`
 
-在 :numref:`sec_bptt` 中，我们讨论了如何在 rnN 中计算梯度。特别是我们发现矩阵的长积可能会导致梯度消失或爆炸。让我们简单地考虑一下这种渐变异常在实践中的含义：
+在 :numref:`sec_bptt`中，
+我们讨论了如何在循环神经网络中计算梯度，
+以及矩阵连续乘积可以导致梯度消失或梯度爆炸的问题。
+下面我们简单思考一下这种梯度异常在实践中的意义：
 
-* 我们可能会遇到一种情况，即早期观察对于预测未来所有观察都非常重要。考虑一下有些人为的情况，其中第一个观测值包含校验和，目标是识别序列末尾的校验和是否正确。在这种情况下，第一个令牌的影响至关重要。我们希望有一些机制将重要的早期信息存储在 * 内存单元 * 中。如果没有这种机制，我们将不得不为这一观察分配一个非常大的梯度，因为它会影响到随后的所有观察。
-* 我们可能会遇到某些代币没有相关观察的情况。例如，在解析网页时，可能会有辅助 HTML 代码，这些代码与评估页面上传达的情绪无关。我们希望有一些机制在潜在状态表示中 * 跳过 * 此类代币。
-* 我们可能会遇到序列的各个部分之间有逻辑中断的情况。例如，可能会在书中的章节之间进行过渡，或者证券的熊市和牛市之间的过渡。在这种情况下，最好有一种方法 * 重新设置 * 我们的内部州代表。
+* 我们可能会遇到这样的情况：早期观测值对预测所有未来观测值具有非常重要的意义。
+  考虑一个极端情况，其中第一个观测值包含一个校验和，
+  目标是在序列的末尾辨别校验和是否正确。
+  在这种情况下，第一个词元的影响至关重要。
+  我们希望有某些机制能够在一个记忆元里存储重要的早期信息。
+  如果没有这样的机制，我们将不得不给这个观测值指定一个非常大的梯度，
+  因为它会影响所有后续的观测值。
+* 我们可能会遇到这样的情况：一些词元没有相关的观测值。
+  例如，在对网页内容进行情感分析时，
+  可能有一些辅助HTML代码与网页传达的情绪无关。
+  我们希望有一些机制来*跳过*隐状态表示中的此类词元。
+* 我们可能会遇到这样的情况：序列的各个部分之间存在逻辑中断。
+  例如，书的章节之间可能会有过渡存在，
+  或者证券的熊市和牛市之间可能会有过渡存在。
+  在这种情况下，最好有一种方法来*重置*我们的内部状态表示。
 
-为解决这个问题，已经提出了若干方法。最早的一个是长短期记忆 :cite:`Hochreiter.Schmidhuber.1997`，我们将在 :numref:`sec_lstm` 中讨论。门控循环单元 (GRU) :cite:`Cho.Van-Merrienboer.Bahdanau.ea.2014` 是一种稍微更精简的变体，通常提供可比的性能，并且计算 :cite:`Chung.Gulcehre.Cho.ea.2014` 的速度要快得多。由于它的简单性，让我们从 GRU 开始。
+在学术界已经提出了许多方法来解决这类问题。
+其中最早的方法是"长短期记忆"（long-short-term memory，LSTM）
+ :cite:`Hochreiter.Schmidhuber.1997`，
+我们将在 :numref:`sec_lstm`中讨论。
+门控循环单元（gated recurrent unit，GRU）
+ :cite:`Cho.Van-Merrienboer.Bahdanau.ea.2014`
+是一个稍微简化的变体，通常能够提供同等的效果，
+并且计算 :cite:`Chung.Gulcehre.Cho.ea.2014`的速度明显更快。
+由于门控循环单元更简单，我们从它开始解读。
 
-## 封闭的隐藏状态
+## 门控隐状态
 
-香草 rnN 和 gRU 之间的关键区别在于后者支持隐藏状态的门控。这意味着我们有专门的机制来确定隐藏状态何时应该为 * 更新 * 以及何时应该是 * 重置 *。学习了这些机制，它们解决了上述问题。例如，如果第一个令牌非常重要，我们将学会在第一次观察之后不更新隐藏状态。同样，我们将学会跳过无关紧要的临时观察。最后，我们将学习在需要时重置潜在状态。我们在下面详细讨论这个问题。
+门控循环单元与普通的循环神经网络之间的关键区别在于：
+前者支持隐状态的门控。
+这意味着模型有专门的机制来确定应该何时更新隐状态，
+以及应该何时重置隐状态。
+这些机制是可学习的，并且能够解决了上面列出的问题。
+例如，如果第一个词元非常重要，
+模型将学会在第一次观测之后不更新隐状态。
+同样，模型也可以学会跳过不相关的临时观测。
+最后，模型还将学会在需要的时候重置隐状态。
+下面我们将详细讨论各类门控。
 
-### 重置 Gate 和更新门
+### 重置门和更新门
 
-我们需要引入的第一件事是 * 重置门 * 和 * 更新门 *。我们将它们设计成为带有 $(0, 1)$ 条目的向量，以便我们可以执行凸组合。例如，重置门将允许我们控制我们可能仍想记住的以前状态的程度。同样，更新门将允许我们控制新州有多少只是旧状态的副本。
+我们首先介绍*重置门*（reset gate）和*更新门*（update gate）。
+我们把它们设计成$(0, 1)$区间中的向量，
+这样我们就可以进行凸组合。
+重置门允许我们控制“可能还想记住”的过去状态的数量；
+更新门将允许我们控制新状态中有多少个是旧状态的副本。
 
-我们首先设计这些门。考虑到当前时间步长的输入和上一个时间步的隐藏状态，:numref:`fig_gru_1` 说明了 GRU 中复位和更新门的输入。两个门的输出由两个带有 sigmoid 激活功能的完全连接层给出。
+我们从构造这些门控开始。 :numref:`fig_gru_1`
+描述了门控循环单元中的重置门和更新门的输入，
+输入是由当前时间步的输入和前一时间步的隐状态给出。
+两个门的输出是由使用sigmoid激活函数的两个全连接层给出。
 
-![Computing the reset gate and the update gate in a GRU model.](../img/gru-1.svg)
+![在门控循环单元模型中计算重置门和更新门](../img/gru-1.svg)
 :label:`fig_gru_1`
 
-从数学上讲，对于给定时间步长 $t$，假设输入是微型批次 $\mathbf{X}_t \in \mathbb{R}^{n \times d}$（示例数：$n$，输入数量：$d$），前一个时间步长的隐藏状态为 $\mathbf{H}_{t-1} \in \mathbb{R}^{n \times h}$（隐藏单位数：$h$）。然后，重置门 $\mathbf{R}_t \in \mathbb{R}^{n \times h}$ 和更新门 $\mathbf{Z}_t \in \mathbb{R}^{n \times h}$ 的计算方法如下：
+我们来看一下门控循环单元的数学表达。
+对于给定的时间步$t$，假设输入是一个小批量
+$\mathbf{X}_t \in \mathbb{R}^{n \times d}$
+（样本个数$n$，输入个数$d$），
+上一个时间步的隐状态是
+$\mathbf{H}_{t-1} \in \mathbb{R}^{n \times h}$
+（隐藏单元个数$h$）。
+那么，重置门$\mathbf{R}_t \in \mathbb{R}^{n \times h}$和
+更新门$\mathbf{Z}_t \in \mathbb{R}^{n \times h}$的计算如下所示：
 
 $$
 \begin{aligned}
@@ -31,47 +78,82 @@ $$
 \end{aligned}
 $$
 
-其中 $\mathbf{W}_{xr}, \mathbf{W}_{xz} \in \mathbb{R}^{d \times h}$ 和 $\mathbf{W}_{hr}, \mathbf{W}_{hz} \in \mathbb{R}^{h \times h}$ 是重量参数，$\mathbf{b}_r, \mathbf{b}_z \in \mathbb{R}^{1 \times h}$ 是偏见。请注意，在总和期间触发广播（见 :numref:`subsec_broadcasting`）。我们使用 sigmoid 函数（如 :numref:`sec_mlp` 中所介绍的那样）将输入值转换为间隔 $(0, 1)$。
+其中$\mathbf{W}_{xr}, \mathbf{W}_{xz} \in \mathbb{R}^{d \times h}$
+和$\mathbf{W}_{hr}, \mathbf{W}_{hz} \in \mathbb{R}^{h \times h}$是权重参数，
+$\mathbf{b}_r, \mathbf{b}_z \in \mathbb{R}^{1 \times h}$是偏置参数。
+请注意，在求和过程中会触发广播机制
+（请参阅 :numref:`subsec_broadcasting`）。
+我们使用sigmoid函数（如 :numref:`sec_mlp`中介绍的）
+将输入值转换到区间$(0, 1)$。
 
-### 候选人隐藏状态
+### 候选隐状态
 
-接下来，让我们将重置门 $\mathbf{R}_t$ 与 :eqref:`rnn_h_with_state` 中的常规潜在状态更新机制集成起来。它导致以下情况
-*候选人隐藏状态 *
-$\tilde{\mathbf{H}}_t \in \mathbb{R}^{n \times h}$ 在时间步骤 $t$：
+接下来，让我们将重置门$\mathbf{R}_t$
+与 :eqref:`rnn_h_with_state`
+中的常规隐状态更新机制集成，
+得到在时间步$t$的*候选隐状态*（candidate hidden state）
+$\tilde{\mathbf{H}}_t \in \mathbb{R}^{n \times h}$。
 
 $$\tilde{\mathbf{H}}_t = \tanh(\mathbf{X}_t \mathbf{W}_{xh} + \left(\mathbf{R}_t \odot \mathbf{H}_{t-1}\right) \mathbf{W}_{hh} + \mathbf{b}_h),$$
 :eqlabel:`gru_tilde_H`
 
-其中 $\mathbf{W}_{xh} \in \mathbb{R}^{d \times h}$ 和 $\mathbf{W}_{hh} \in \mathbb{R}^{h \times h}$ 是重量参数，$\mathbf{b}_h \in \mathbb{R}^{1 \times h}$ 是偏置，符号 $\odot$ 是哈达马德（元素）产品运营商。在这里，我们使用 tanh 形式的非线性来确保候选隐藏状态中的值保持在区间 $(-1, 1)$。
+其中$\mathbf{W}_{xh} \in \mathbb{R}^{d \times h}$
+和$\mathbf{W}_{hh} \in \mathbb{R}^{h \times h}$是权重参数，
+$\mathbf{b}_h \in \mathbb{R}^{1 \times h}$是偏置项，
+符号$\odot$是Hadamard积（按元素乘积）运算符。
+在这里，我们使用tanh非线性激活函数来确保候选隐状态中的值保持在区间$(-1, 1)$中。
 
-结果是 * 候选人 *，因为我们仍然需要纳入更新门的操作。与 :eqref:`rnn_h_with_state` 相比，现在可以通过 $\mathbf{R}_t$ 和 $\mathbf{H}_{t-1}$ 的元素乘法来降低以前各州的影响力。每当重置门 $\mathbf{R}_t$ 中的条目接近 1 时，我们就会恢复一个香草 RNN，例如 :eqref:`rnn_h_with_state`。对于重置门 $\mathbf{R}_t$ 中接近 0 的所有条目，候选隐藏状态是以 $\mathbf{X}_t$ 作为输入的 MLP 的结果。因此，任何预先存在的隐藏状态都是 * 重置 * 为默认值。
+与 :eqref:`rnn_h_with_state`相比，
+ :eqref:`gru_tilde_H`中的$\mathbf{R}_t$和$\mathbf{H}_{t-1}$
+的元素相乘可以减少以往状态的影响。
+每当重置门$\mathbf{R}_t$中的项接近$1$时，
+我们恢复一个如 :eqref:`rnn_h_with_state`中的普通的循环神经网络。
+对于重置门$\mathbf{R}_t$中所有接近$0$的项，
+候选隐状态是以$\mathbf{X}_t$作为输入的多层感知机的结果。
+因此，任何预先存在的隐状态都会被*重置*为默认值。
 
-:numref:`fig_gru_2` 说明了应用复位门后的计算流程。
+ :numref:`fig_gru_2`说明了应用重置门之后的计算流程。
 
-![Computing the candidate hidden state in a GRU model.](../img/gru-2.svg)
+![在门控循环单元模型中计算候选隐状态](../img/gru-2.svg)
 :label:`fig_gru_2`
 
-### 隐藏状态
+### 隐状态
 
-最后，我们需要纳入更新门 $\mathbf{Z}_t$ 的效果。这决定了新的隐藏状态 $\mathbf{H}_t \in \mathbb{R}^{n \times h}$ 只是旧状态 $\mathbf{H}_{t-1}$ 的程度，以及新候选状态 $\tilde{\mathbf{H}}_t$ 的使用程度。更新门 $\mathbf{Z}_t$ 可用于此目的，只需在 $\mathbf{H}_{t-1}$ 和 $\tilde{\mathbf{H}}_t$ 之间使用元素凸组合。这将导致 GRU 的最终更新方程式：
+上述的计算结果只是候选隐状态，我们仍然需要结合更新门$\mathbf{Z}_t$的效果。
+这一步确定新的隐状态$\mathbf{H}_t \in \mathbb{R}^{n \times h}$
+在多大程度上来自旧的状态$\mathbf{H}_{t-1}$和
+新的候选状态$\tilde{\mathbf{H}}_t$。
+更新门$\mathbf{Z}_t$仅需要在
+$\mathbf{H}_{t-1}$和$\tilde{\mathbf{H}}_t$
+之间进行按元素的凸组合就可以实现这个目标。
+这就得出了门控循环单元的最终更新公式：
 
 $$\mathbf{H}_t = \mathbf{Z}_t \odot \mathbf{H}_{t-1}  + (1 - \mathbf{Z}_t) \odot \tilde{\mathbf{H}}_t.$$
 
-每当更新门 $\mathbf{Z}_t$ 接近 1 时，我们只需保留旧状态。在这种情况下，$\mathbf{X}_t$ 的信息基本上被忽略，实际上跳过了依赖链中的时间步长 $t$。相比之下，只要 $\mathbf{Z}_t$ 接近 0，新的潜在状态 $\mathbf{H}_t$ 就接近候选潜在状态 $\tilde{\mathbf{H}}_t$。这些设计可以帮助我们应对 rnN 中逐渐消失的渐变问题，并更好地捕获具有较长时间步长距离的序列的依赖关系。例如，如果整个子序列的所有时间步长度的更新门都接近 1，则无论子序列的长度如何，其开始时间步的旧隐藏状态都将很容易保留并传递到其末尾。
+每当更新门$\mathbf{Z}_t$接近$1$时，模型就倾向只保留旧状态。
+此时，来自$\mathbf{X}_t$的信息基本上被忽略，
+从而有效地跳过了依赖链条中的时间步$t$。
+相反，当$\mathbf{Z}_t$接近$0$时，
+新的隐状态$\mathbf{H}_t$就会接近候选隐状态$\tilde{\mathbf{H}}_t$。
+这些设计可以帮助我们处理循环神经网络中的梯度消失问题，
+并更好地捕获时间步距离很长的序列的依赖关系。
+例如，如果整个子序列的所有时间步的更新门都接近于$1$，
+则无论序列的长度如何，在序列起始时间步的旧隐状态都将很容易保留并传递到序列结束。
 
-:numref:`fig_gru_3` 说明了更新门运行之后的计算流程。
+ :numref:`fig_gru_3`说明了更新门起作用后的计算流。
 
-![Computing the hidden state in a GRU model.](../img/gru-3.svg)
+![计算门控循环单元模型中的隐状态](../img/gru-3.svg)
 :label:`fig_gru_3`
 
-总之，GRU 具有以下两个区别特征：
+总之，门控循环单元具有以下两个显著特征：
 
-* 重置门有助于捕获顺序中的短期依赖关系。
-* 更新门有助于按顺序捕获长期依赖关系。
+* 重置门有助于捕获序列中的短期依赖关系；
+* 更新门有助于捕获序列中的长期依赖关系。
 
-## 从头开始实施
+## 从零开始实现
 
-为了更好地了解 GRU 模型，让我们从头开始实施它。我们首先阅读我们在 :numref:`sec_rnn_scratch` 中使用的时间机器数据集。下面给出了读取数据集的代码。
+为了更好地理解门控循环单元模型，我们从零开始实现它。
+首先，我们读取 :numref:`sec_rnn_scratch`中使用的时间机器数据集：
 
 ```{.python .input}
 from d2l import mxnet as d2l
@@ -93,9 +175,34 @@ batch_size, num_steps = 32, 35
 train_iter, vocab = d2l.load_data_time_machine(batch_size, num_steps)
 ```
 
-### 初始化模型参数
+```{.python .input}
+#@tab tensorflow
+from d2l import tensorflow as d2l
+import tensorflow as tf
 
-下一步是初始化模型参数。我们从标准差的高斯分布中绘制权重为 0.01，然后将偏置设置为 0。超参数 `num_hiddens` 定义了隐藏单位的数量。我们实例化与更新门、重置门、候选隐藏状态和输出层相关的所有权重和偏置。
+batch_size, num_steps = 32, 35
+train_iter, vocab = d2l.load_data_time_machine(batch_size, num_steps)
+```
+
+```{.python .input}
+#@tab paddle
+from d2l import paddle as d2l
+import warnings
+warnings.filterwarnings("ignore")
+import paddle
+import paddle.nn.functional as F
+from paddle import nn
+
+batch_size, num_steps = 32, 35
+train_iter, vocab = d2l.load_data_time_machine(batch_size, num_steps)
+```
+
+### [**初始化模型参数**]
+
+下一步是初始化模型参数。
+我们从标准差为$0.01$的高斯分布中提取权重，
+并将偏置项设为$0$，超参数`num_hiddens`定义隐藏单元的数量，
+实例化与更新门、重置门、候选隐状态和输出层相关的所有权重和偏置。
 
 ```{.python .input}
 def get_params(vocab_size, num_hiddens, device):
@@ -109,13 +216,13 @@ def get_params(vocab_size, num_hiddens, device):
                 normal((num_hiddens, num_hiddens)),
                 np.zeros(num_hiddens, ctx=device))
 
-    W_xz, W_hz, b_z = three()  # Update gate parameters
-    W_xr, W_hr, b_r = three()  # Reset gate parameters
-    W_xh, W_hh, b_h = three()  # Candidate hidden state parameters
-    # Output layer parameters
+    W_xz, W_hz, b_z = three()  # 更新门参数
+    W_xr, W_hr, b_r = three()  # 重置门参数
+    W_xh, W_hh, b_h = three()  # 候选隐状态参数
+    # 输出层参数
     W_hq = normal((num_hiddens, num_outputs))
     b_q = np.zeros(num_outputs, ctx=device)
-    # Attach gradients
+    # 附加梯度
     params = [W_xz, W_hz, b_z, W_xr, W_hr, b_r, W_xh, W_hh, b_h, W_hq, b_q]
     for param in params:
         param.attach_grad()
@@ -135,22 +242,73 @@ def get_params(vocab_size, num_hiddens, device):
                 normal((num_hiddens, num_hiddens)),
                 d2l.zeros(num_hiddens, device=device))
 
-    W_xz, W_hz, b_z = three()  # Update gate parameters
-    W_xr, W_hr, b_r = three()  # Reset gate parameters
-    W_xh, W_hh, b_h = three()  # Candidate hidden state parameters
-    # Output layer parameters
+    W_xz, W_hz, b_z = three()  # 更新门参数
+    W_xr, W_hr, b_r = three()  # 重置门参数
+    W_xh, W_hh, b_h = three()  # 候选隐状态参数
+    # 输出层参数
     W_hq = normal((num_hiddens, num_outputs))
     b_q = d2l.zeros(num_outputs, device=device)
-    # Attach gradients
+    # 附加梯度
     params = [W_xz, W_hz, b_z, W_xr, W_hr, b_r, W_xh, W_hh, b_h, W_hq, b_q]
     for param in params:
         param.requires_grad_(True)
     return params
 ```
 
+```{.python .input}
+#@tab tensorflow
+def get_params(vocab_size, num_hiddens):
+    num_inputs = num_outputs = vocab_size
+
+    def normal(shape):
+        return d2l.normal(shape=shape,stddev=0.01,mean=0,dtype=tf.float32)
+
+    def three():
+        return (tf.Variable(normal((num_inputs, num_hiddens)), dtype=tf.float32),
+                tf.Variable(normal((num_hiddens, num_hiddens)), dtype=tf.float32),
+                tf.Variable(d2l.zeros(num_hiddens), dtype=tf.float32))
+
+    W_xz, W_hz, b_z = three()  # 更新门参数
+    W_xr, W_hr, b_r = three()  # 重置门参数
+    W_xh, W_hh, b_h = three()  # 候选隐状态参数
+    # 输出层参数
+    W_hq = tf.Variable(normal((num_hiddens, num_outputs)), dtype=tf.float32)
+    b_q = tf.Variable(d2l.zeros(num_outputs), dtype=tf.float32)
+    params = [W_xz, W_hz, b_z, W_xr, W_hr, b_r, W_xh, W_hh, b_h, W_hq, b_q]
+    return params
+```
+
+```{.python .input}
+#@tab paddle
+def get_params(vocab_size, num_hiddens):
+    num_inputs = num_outputs = vocab_size
+
+    def normal(shape):
+        return paddle.randn(shape=shape)*0.01
+
+    def three():
+        return (normal((num_inputs, num_hiddens)),
+                normal((num_hiddens, num_hiddens)),
+                paddle.zeros([num_hiddens]))
+
+    W_xz, W_hz, b_z = three()  # 更新门参数
+    W_xr, W_hr, b_r = three()  # 重置门参数
+    W_xh, W_hh, b_h = three()  # 候选隐状态参数
+    # 输出层参数
+    W_hq = normal((num_hiddens, num_outputs))
+    b_q = paddle.zeros([num_outputs])
+    # 附加梯度
+    params = [W_xz, W_hz, b_z, W_xr, W_hr, b_r, W_xh, W_hh, b_h, W_hq, b_q]
+    for param in params:
+        param.stop_gradient = False
+    return params
+```
+
 ### 定义模型
 
-现在我们将定义隐藏状态初始化函数 `init_gru_state`。就像 :numref:`sec_rnn_scratch` 中定义的 `init_rnn_state` 函数一样，此函数返回一个形状（批量大小，隐藏单位数）的张量，其值均为零。
+现在我们将[**定义隐状态的初始化函数**]`init_gru_state`。
+与 :numref:`sec_rnn_scratch`中定义的`init_rnn_state`函数一样，
+此函数返回一个形状为（批量大小，隐藏单元个数）的张量，张量的值全部为零。
 
 ```{.python .input}
 def init_gru_state(batch_size, num_hiddens, device):
@@ -163,7 +321,21 @@ def init_gru_state(batch_size, num_hiddens, device):
     return (torch.zeros((batch_size, num_hiddens), device=device), )
 ```
 
-现在我们已经准备好定义 GRU 模型了。它的结构与基本 RNN 单元格的结构相同，只是更新方程更复杂。
+```{.python .input}
+#@tab tensorflow
+def init_gru_state(batch_size, num_hiddens):
+    return (d2l.zeros((batch_size, num_hiddens)), )
+```
+
+```{.python .input}
+#@tab paddle
+def init_gru_state(batch_size, num_hiddens):
+    return (paddle.zeros([batch_size, num_hiddens]), )
+```
+
+现在我们准备[**定义门控循环单元模型**]，
+模型的架构与基本的循环神经网络单元是相同的，
+只是权重更新公式更为复杂。
 
 ```{.python .input}
 def gru(inputs, state, params):
@@ -196,12 +368,47 @@ def gru(inputs, state, params):
     return torch.cat(outputs, dim=0), (H,)
 ```
 
-### 训练和预测
-
-培训和预测的工作方式与 :numref:`sec_rnn_scratch` 完全相同。训练后，我们分别在提供的前缀 “时间旅行者” 和 “旅行者” 之后打印训练套装上的困惑和预测顺序。
+```{.python .input}
+#@tab tensorflow
+def gru(inputs, state, params):
+    W_xz, W_hz, b_z, W_xr, W_hr, b_r, W_xh, W_hh, b_h, W_hq, b_q = params
+    H, = state
+    outputs = []
+    for X in inputs:
+        X = tf.reshape(X,[-1,W_xh.shape[0]])
+        Z = tf.sigmoid(tf.matmul(X, W_xz) + tf.matmul(H, W_hz) + b_z)
+        R = tf.sigmoid(tf.matmul(X, W_xr) + tf.matmul(H, W_hr) + b_r)
+        H_tilda = tf.tanh(tf.matmul(X, W_xh) + tf.matmul(R * H, W_hh) + b_h)
+        H = Z * H + (1 - Z) * H_tilda
+        Y = tf.matmul(H, W_hq) + b_q
+        outputs.append(Y)
+    return tf.concat(outputs, axis=0), (H,)
+```
 
 ```{.python .input}
-#@tab all
+#@tab paddle
+def gru(inputs, state, params):
+    W_xz, W_hz, b_z, W_xr, W_hr, b_r, W_xh, W_hh, b_h, W_hq, b_q = params
+    H,*_ = state
+    outputs = []
+    for X in inputs:
+        Z = F.sigmoid((X @ W_xz) + (H @ W_hz) + b_z)
+        R = F.sigmoid((X @ W_xr) + (H @ W_hr) + b_r)
+        H_tilda = paddle.tanh((X @ W_xh) + ((R * H) @ W_hh) + b_h)
+        H = Z * H + (1 - Z) * H_tilda
+        Y = H @ W_hq + b_q
+        outputs.append(Y)
+    return paddle.concat(outputs, axis=0), (H,*_)
+```
+
+### [**训练**]与预测
+
+训练和预测的工作方式与 :numref:`sec_rnn_scratch`完全相同。
+训练结束后，我们分别打印输出训练集的困惑度，
+以及前缀“time traveler”和“traveler”的预测序列上的困惑度。
+
+```{.python .input}
+#@tab mxnet, pytorch
 vocab_size, num_hiddens, device = len(vocab), 256, d2l.try_gpu()
 num_epochs, lr = 500, 1
 model = d2l.RNNModelScratch(len(vocab), num_hiddens, device, get_params,
@@ -209,9 +416,33 @@ model = d2l.RNNModelScratch(len(vocab), num_hiddens, device, get_params,
 d2l.train_ch8(model, train_iter, vocab, lr, num_epochs, device)
 ```
 
-## 简明的实施
+```{.python .input}
+#@tab tensorflow
+vocab_size, num_hiddens, device_name = len(vocab), 256, d2l.try_gpu()._device_name
+# 定义训练策略
+strategy = tf.distribute.OneDeviceStrategy(device_name)
+num_epochs, lr = 500, 1
+with strategy.scope():
+    model = d2l.RNNModelScratch(len(vocab), num_hiddens, init_gru_state, gru, get_params)
 
-在高级 API 中，我们可以直接实例化 GPU 模型。这封装了我们在上面明确说明的所有配置细节。该代码要快得多，因为它使用编译的运算符而不是 Python 来解决我们之前拼出的许多细节。
+d2l.train_ch8(model, train_iter, vocab, lr, num_epochs, strategy)
+```
+
+```{.python .input}
+#@tab paddle
+vocab_size, num_hiddens, device = len(vocab), 256, d2l.try_gpu()
+num_epochs, lr = 500, 1.0
+model = d2l.RNNModelScratch(len(vocab), num_hiddens, get_params,
+                            init_gru_state, gru)
+d2l.train_ch8(model, train_iter, vocab, lr, num_epochs, device)
+```
+
+## [**简洁实现**]
+
+高级API包含了前文介绍的所有配置细节，
+所以我们可以直接实例化门控循环单元模型。
+这段代码的运行速度要快得多，
+因为它使用的是编译好的运算符而不是Python来处理之前阐述的许多细节。
 
 ```{.python .input}
 gru_layer = rnn.GRU(num_hiddens)
@@ -228,24 +459,51 @@ model = model.to(device)
 d2l.train_ch8(model, train_iter, vocab, lr, num_epochs, device)
 ```
 
-## 摘要
+```{.python .input}
+#@tab tensorflow
+gru_cell = tf.keras.layers.GRUCell(num_hiddens,
+    kernel_initializer='glorot_uniform')
+gru_layer = tf.keras.layers.RNN(gru_cell, time_major=True,
+    return_sequences=True, return_state=True)
 
-* 封闭的 RNN 可以更好地捕获具有较长时间步长距离的序列的依赖关系。
-* 重置门有助于捕获顺序中的短期依赖关系。
-* 更新门有助于按顺序捕获长期依赖关系。
-* 每当复位门打开时，GRU 都会包含基本的 RNN 作为极端情况。他们还可以通过打开更新门来跳过子序列。
+device_name = d2l.try_gpu()._device_name
+strategy = tf.distribute.OneDeviceStrategy(device_name)
+with strategy.scope():
+    model = d2l.RNNModel(gru_layer, vocab_size=len(vocab))
+
+d2l.train_ch8(model, train_iter, vocab, lr, num_epochs, strategy)
+```
+
+```{.python .input}
+#@tab paddle
+num_inputs = vocab_size
+gru_layer = nn.GRU(num_inputs, num_hiddens, time_major=True)
+model = d2l.RNNModel(gru_layer, len(vocab))
+d2l.train_ch8(model, train_iter, vocab, lr, num_epochs, device)
+```
+
+## 小结
+
+* 门控循环神经网络可以更好地捕获时间步距离很长的序列上的依赖关系。
+* 重置门有助于捕获序列中的短期依赖关系。
+* 更新门有助于捕获序列中的长期依赖关系。
+* 重置门打开时，门控循环单元包含基本循环神经网络；更新门打开时，门控循环单元可以跳过子序列。
 
 ## 练习
 
-1. 假设我们只想使用时间步骤 $t'$ 的输入来预测时间步骤 $t > t'$ 的输出。每个时间步长的重置和更新门的最佳值是什么？
-1. 调整超参数并分析它们对运行时间、困惑和输出序列的影响。
-1. 比较 `rnn.RNN` 和 `rnn.GRU` 实现的运行时、困惑和输出字符串。
-1. 如果只实施 GRU 的一部分（例如，只有重置门或只有更新门），会发生什么情况？
+1. 假设我们只想使用时间步$t'$的输入来预测时间步$t > t'$的输出。对于每个时间步，重置门和更新门的最佳值是什么？
+1. 调整和分析超参数对运行时间、困惑度和输出顺序的影响。
+1. 比较`rnn.RNN`和`rnn.GRU`的不同实现对运行时间、困惑度和输出字符串的影响。
+1. 如果仅仅实现门控循环单元的一部分，例如，只有一个重置门或一个更新门会怎样？
 
 :begin_tab:`mxnet`
-[Discussions](https://discuss.d2l.ai/t/342)
+[Discussions](https://discuss.d2l.ai/t/2764)
 :end_tab:
 
 :begin_tab:`pytorch`
-[Discussions](https://discuss.d2l.ai/t/1056)
+[Discussions](https://discuss.d2l.ai/t/2763)
+:end_tab:
+
+:begin_tab:`paddle`
+[Discussions](https://discuss.d2l.ai/t/11812)
 :end_tab:
